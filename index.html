@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>チェッカーボード 色錯視 キャンバス</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background: #111827; }
+  canvas { display: block; max-width: 100%; }
+  input[type=range] { accent-color: #10b981; }
+</style>
+</head>
+<body class="text-white min-h-screen p-4">
+<div class="max-w-3xl mx-auto">
+  <h1 class="text-2xl font-bold mb-1 text-emerald-300">チェッカーボード 色錯視</h1>
+  <p class="text-gray-400 text-sm mb-4">有名な色の錯視パターンをインタラクティブに体験</p>
+
+  <div class="flex flex-wrap gap-4">
+    <!-- Canvas -->
+    <div class="flex-1 min-w-64">
+      <canvas id="canvas" width="480" height="480" class="border border-emerald-900 rounded"></canvas>
+    </div>
+
+    <!-- Controls -->
+    <div class="w-60 flex flex-col gap-3 text-sm">
+
+      <!-- Illusion selector -->
+      <div class="bg-gray-800 rounded p-3">
+        <div class="text-emerald-300 font-semibold mb-2">錯視の種類</div>
+        <div class="flex flex-col gap-2">
+          <button class="illusion-btn bg-emerald-700 hover:bg-emerald-600 text-white py-2 px-3 rounded text-left transition" data-illusion="checkerboard" aria-label="アデルソンのチェッカー錯視を表示">
+            ① アデルソン チェッカー
+          </button>
+          <button class="illusion-btn bg-gray-700 hover:bg-gray-600 text-white py-2 px-3 rounded text-left transition" data-illusion="white" aria-label="ホワイト錯視を表示">
+            ② ホワイト錯視
+          </button>
+          <button class="illusion-btn bg-gray-700 hover:bg-gray-600 text-white py-2 px-3 rounded text-left transition" data-illusion="hermann" aria-label="ハーマン格子を表示">
+            ③ ハーマン格子
+          </button>
+        </div>
+      </div>
+
+      <!-- Contrast slider -->
+      <div class="bg-gray-800 rounded p-3">
+        <label class="text-emerald-300 font-semibold">コントラスト</label>
+        <input type="range" id="contrastSlider" min="20" max="100" value="70" class="w-full mt-1">
+        <div class="text-gray-400 text-xs mt-1" id="contrastInfo">70%</div>
+      </div>
+
+      <!-- Reveal button -->
+      <button id="btnReveal" class="bg-yellow-600 hover:bg-yellow-500 text-white py-2 px-3 rounded transition font-semibold" aria-label="答えを見る（同色マスを強調）">
+        答えを見る
+      </button>
+
+      <!-- Explanation -->
+      <div class="bg-gray-800 rounded p-3">
+        <div class="text-emerald-300 font-semibold mb-1">仕組み</div>
+        <div class="text-gray-300 text-xs leading-relaxed" id="explanationText">
+          アデルソンのチェッカー錯視: 影のかかったチェス盤上のマス目Aとマス目Bは実際には同じ灰色。脳が周囲の明暗文脈から色を推論するため、同じ色が異なって見える（側方抑制と文脈依存輝度知覚）。
+        </div>
+      </div>
+
+      <!-- Real values -->
+      <div class="bg-gray-800 rounded p-3 text-xs text-gray-400" id="colorInfo">
+        A: rgb(120, 120, 120) | B: rgb(120, 120, 120)
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+let currentIllusion = 'checkerboard';
+let contrast = 0.70;
+let revealed = false;
+
+const explanations = {
+  checkerboard: 'アデルソンのチェッカー錯視: 影のかかったチェス盤上のマス目Aとマス目Bは実際には同じ灰色。脳が周囲の明暗文脈から色を推論するため、同じ色が異なって見える（側方抑制と文脈依存輝度知覚）。',
+  white: 'ホワイト錯視: 同じ灰色のバーが、白い縞の上では暗く、黒い縞の上では明るく見える。周囲の輝度による誘導が、明度の知覚を変化させる（輝度誘導・側方抑制の空間的非対称性）。',
+  hermann: 'ハーマン格子: 白い格子線の交差点に灰色の幻影（ゴースト）が見える。これは網膜の側方抑制（周囲の神経細胞が中心を抑制する）によって生じる錯覚。交差点を直視すると消える。'
+};
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function gray(v) { return `rgb(${v},${v},${v})`; }
+
+// ---- Adelson Checkerboard ----
+function drawCheckerboard(reveal) {
+  const cellSize = 48;
+  const cols = 8, rows = 8;
+  const dark = Math.round(lerp(40, 80, contrast));
+  const light = Math.round(lerp(160, 220, contrast));
+  // The "same gray" value we'll use for A and B
+  const targetGray = Math.round((dark + light) / 2 + 8);
+
+  const markA = { col: 1, row: 6 }; // dark square in light region
+  const markB = { col: 3, row: 2 }; // light square in shadow
+
+  // Draw checkerboard
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const isLight = (r + c) % 2 === 0;
+      let base = isLight ? light : dark;
+
+      // Shadow: a diagonal shadow across right half
+      const inShadow = (c >= 2 && c <= 5) && (r >= 1 && r <= 6) && (c - r < 4) && (c + r > 3);
+      if (inShadow) base = Math.max(dark, Math.round(base * 0.65));
+
+      // Override A and B cells to same gray
+      if (r === markA.row && c === markA.col) base = targetGray;
+      if (r === markB.row && c === markB.col) base = targetGray;
+
+      ctx.fillStyle = gray(base);
+      ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+    }
+  }
+
+  // Shadow overlay gradient
+  const grad = ctx.createLinearGradient(2 * cellSize, 1 * cellSize, 5.5 * cellSize, 6 * cellSize);
+  grad.addColorStop(0, 'rgba(0,0,0,0.38)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Re-draw A and B at correct value (after shadow overlay)
+  ctx.fillStyle = gray(targetGray);
+  ctx.fillRect(markA.col * cellSize, markA.row * cellSize, cellSize, cellSize);
+  ctx.fillStyle = gray(targetGray);
+  ctx.fillRect(markB.col * cellSize, markB.row * cellSize, cellSize, cellSize);
+
+  // Labels
+  ctx.font = 'bold 18px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f59e0b';
+  ctx.fillText('A', markA.col * cellSize + cellSize / 2, markA.row * cellSize + cellSize / 2);
+  ctx.fillText('B', markB.col * cellSize + cellSize / 2, markB.row * cellSize + cellSize / 2);
+
+  // Reveal: draw connecting line + same-color indicator
+  if (reveal) {
+    const ax = markA.col * cellSize + cellSize / 2;
+    const ay = markA.row * cellSize + cellSize / 2;
+    const bx = markB.col * cellSize + cellSize / 2;
+    const by = markB.row * cellSize + cellSize / 2;
+    ctx.strokeStyle = '#22c55e';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 4]);
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Overlay same color patches
+    ctx.strokeStyle = '#22c55e';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(markA.col * cellSize + 2, markA.row * cellSize + 2, cellSize - 4, cellSize - 4);
+    ctx.strokeRect(markB.col * cellSize + 2, markB.row * cellSize + 2, cellSize - 4, cellSize - 4);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(W / 2 - 130, H - 48, 260, 36);
+    ctx.fillStyle = '#22c55e';
+    ctx.font = '13px sans-serif';
+    ctx.fillText(`A と B は同じ灰色 (${targetGray},${targetGray},${targetGray})`, W / 2, H - 30);
+  }
+
+  document.getElementById('colorInfo').textContent = `A: rgb(${targetGray},${targetGray},${targetGray})  |  B: rgb(${targetGray},${targetGray},${targetGray})`;
+}
+
+// ---- White's Illusion ----
+function drawWhiteIllusion(reveal) {
+  const stripeW = W / 8;
+  const barH = 60;
+  const barY1 = 140, barY2 = 280;
+  const gray1 = Math.round(lerp(100, 140, contrast));
+  const gray2 = gray1; // Same!
+
+  // Draw vertical stripes
+  for (let i = 0; i < 8; i++) {
+    const isWhite = i % 2 === 0;
+    const v = isWhite ? Math.round(lerp(200, 240, contrast)) : Math.round(lerp(30, 60, contrast));
+    ctx.fillStyle = gray(v);
+    ctx.fillRect(i * stripeW, 0, stripeW, H);
+  }
+
+  // Draw gray bars (same gray, different perceived brightness)
+  // Bar 1: interrupts white stripes (appears darker)
+  ctx.fillStyle = gray(gray1);
+  ctx.fillRect(0, barY1, W, barH);
+
+  // Bar 2: interrupts black stripes (appears lighter)
+  ctx.fillStyle = gray(gray2);
+  ctx.fillRect(0, barY2, W, barH);
+
+  // Re-draw white stripes over bar 1 to create white-background illusion
+  for (let i = 0; i < 8; i++) {
+    const isWhite = i % 2 === 0;
+    if (isWhite) {
+      const v = Math.round(lerp(200, 240, contrast));
+      ctx.fillStyle = gray(v);
+      ctx.fillRect(i * stripeW, barY1, stripeW, barH);
+    }
+  }
+
+  // Re-draw black stripes over bar 2
+  for (let i = 0; i < 8; i++) {
+    const isWhite = i % 2 === 0;
+    if (!isWhite) {
+      const v = Math.round(lerp(30, 60, contrast));
+      ctx.fillStyle = gray(v);
+      ctx.fillRect(i * stripeW, barY2, stripeW, barH);
+    }
+  }
+
+  // Labels
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillText('バー 1 →', W - 4, barY1 + barH / 2);
+  ctx.fillText('バー 2 →', W - 4, barY2 + barH / 2);
+
+  if (reveal) {
+    // Draw swatches side by side at bottom
+    const sw = 80, sh = 50;
+    const sx = W / 2 - sw - 10;
+    const sy = H - 80;
+    ctx.fillStyle = gray(gray1);
+    ctx.fillRect(sx, sy, sw, sh);
+    ctx.fillStyle = gray(gray2);
+    ctx.fillRect(sx + sw + 20, sy, sw, sh);
+
+    ctx.strokeStyle = '#22c55e';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(sx, sy, sw, sh);
+    ctx.strokeRect(sx + sw + 20, sy, sw, sh);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(W / 2 - 140, sy - 28, 280, 24);
+    ctx.fillStyle = '#22c55e';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`両方同じ灰色: rgb(${gray1},${gray1},${gray1})`, W / 2, sy - 16);
+  }
+
+  document.getElementById('colorInfo').textContent = `バー1: rgb(${gray1},${gray1},${gray1})  |  バー2: rgb(${gray2},${gray2},${gray2})`;
+}
+
+// ---- Hermann Grid ----
+function drawHermannGrid(reveal) {
+  const cellSize = 55;
+  const lineWidth = 14;
+  const bgDark = Math.round(lerp(20, 50, 1 - contrast));
+  const bgLight = Math.round(lerp(200, 240, contrast));
+  const ghostV = Math.round((bgDark + bgLight) / 2);
+
+  // Fill dark background
+  ctx.fillStyle = gray(bgDark);
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw white grid lines
+  const cols = Math.floor(W / cellSize);
+  const rows = Math.floor(H / cellSize);
+
+  ctx.fillStyle = gray(bgLight);
+  for (let c = 0; c <= cols; c++) {
+    ctx.fillRect(c * cellSize - lineWidth / 2, 0, lineWidth, H);
+  }
+  for (let r = 0; r <= rows; r++) {
+    ctx.fillRect(0, r * cellSize - lineWidth / 2, W, lineWidth);
+  }
+
+  // Intersection markers in reveal mode
+  if (reveal) {
+    for (let c = 1; c <= cols; c++) {
+      for (let r = 1; r <= rows; r++) {
+        const ix = c * cellSize;
+        const iy = r * cellSize;
+        if (ix > lineWidth && iy > lineWidth && ix < W - lineWidth && iy < H - lineWidth) {
+          ctx.fillStyle = `rgba(${ghostV},${ghostV},${ghostV},0.6)`;
+          ctx.beginPath();
+          ctx.arc(ix, iy, 7, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+    }
+
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(W / 2 - 150, H - 44, 300, 32);
+    ctx.fillStyle = '#22c55e';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('交差点に現れる幻影を黄円でマーク', W / 2, H - 28);
+  } else {
+    // Hint
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('格子の交差点に灰色の幻影が見える？', W / 2, 10);
+  }
+
+  document.getElementById('colorInfo').textContent = `格子: rgb(${bgLight},${bgLight},${bgLight})  |  幻影の推定色: rgb(${ghostV},${ghostV},${ghostV})`;
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  switch(currentIllusion) {
+    case 'checkerboard': drawCheckerboard(revealed); break;
+    case 'white': drawWhiteIllusion(revealed); break;
+    case 'hermann': drawHermannGrid(revealed); break;
+  }
+  document.getElementById('explanationText').textContent = explanations[currentIllusion];
+}
+
+// Controls
+document.querySelectorAll('.illusion-btn').forEach(btn => {
+  btn.addEventListener('click', function() {
+    currentIllusion = this.dataset.illusion;
+    revealed = false;
+    document.getElementById('btnReveal').textContent = '答えを見る';
+    document.getElementById('btnReveal').classList.remove('bg-emerald-600');
+    document.getElementById('btnReveal').classList.add('bg-yellow-600');
+    document.querySelectorAll('.illusion-btn').forEach(b => {
+      b.classList.remove('bg-emerald-700');
+      b.classList.add('bg-gray-700');
+    });
+    this.classList.remove('bg-gray-700');
+    this.classList.add('bg-emerald-700');
+    render();
+  });
+});
+
+document.getElementById('contrastSlider').addEventListener('input', function() {
+  contrast = parseInt(this.value) / 100;
+  document.getElementById('contrastInfo').textContent = `${this.value}%`;
+  render();
+});
+
+document.getElementById('btnReveal').addEventListener('click', function() {
+  revealed = !revealed;
+  this.textContent = revealed ? '錯視に戻す' : '答えを見る';
+  this.classList.toggle('bg-emerald-600', revealed);
+  this.classList.toggle('bg-yellow-600', !revealed);
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
